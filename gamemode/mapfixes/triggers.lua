@@ -1,7 +1,7 @@
 --[[
   Slide - gamemode/mapfixes/triggers.lua
 
-    Copyright 2017 Lex Robinson
+    Copyright 2017-2020 Lex Robinson
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -14,98 +14,90 @@
     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
     See the License for the specific language governing permissions and
     limitations under the License.
-]]--
+]] --
 DEFINE_BASECLASS "gamemode_base"
 
 -- Interval between the -200 and 100 damage caused by trigger_hurt that informs us a player is at the end
 local END_CHECK_INTERVAL = 5
 
 local function replaceTrigger(ent)
-  if not ent.kvs then
-    ErrorNoHalt(string.format("Entity %s doesn't have its .kvs?", ent))
-    return
-  end
+	if not ent.kvs then
+		ErrorNoHalt(string.format("Entity %s doesn't have its .kvs?", ent))
+		return
+	end
 
-  -- Take the ent out of the game but don't remove it (Just in case [?])
-  ent:Fire("Disable")
+	-- Take the ent out of the game but don't remove it (Just in case [?])
+	ent:Fire("Disable")
 
-  local replacement = ents.Create('trigger_multiple')
-  for _, kv in ipairs(ent.kvs) do
-    if kv[1] ~= "classname" then
-      replacement:SetKeyValue(kv[1], kv[2])
-    end
-  end
-  replacement:SetKeyValue("wait", 0)
-  replacement:Spawn()
-  replacement:Activate()
+	local replacement = ents.Create("trigger_multiple")
+	for _, kv in ipairs(ent.kvs) do
+		if kv[1] ~= "classname" then
+			replacement:SetKeyValue(kv[1], kv[2])
+		end
+	end
+	replacement:SetKeyValue("wait", 0)
+	replacement:Spawn()
+	replacement:Activate()
 end
 
 function GM:ReplaceTriggerOnces()
-  for _, ent in pairs(ents.FindByClass("trigger_once")) do
-    replaceTrigger(ent)
-  end
-end
-
---- from: https://wiki.facepunch.com/gmod/ENTITY:TriggerOutput
-function GM:SetupTeleportHook()
-	MapLua = IsValid(MapLua) and MapLua or ents.Create("lua_run")
-	MapLua:SetName("triggerhook")
-	MapLua:Spawn()
-
-	for _, teleport in pairs(ents.FindByClass("trigger_teleport"))do
-		teleport:Fire("AddOutput", "OnStartTouch triggerhook:RunPassedCode:hook.Run('RawOnTeleport'):0:-1")
+	for _, ent in pairs(ents.FindByClass("trigger_once")) do
+		replaceTrigger(ent)
 	end
 end
 
-hook.Add("RawOnTeleport", "RawOnTeleportConvertToProperHookCall", function()
-	local activator, caller = ACTIVATOR, CALLER
-  
-  gamemode.Call("OnPlayerTeleport", activator, caller)
-end)
-
 function GM:ModifyHealTriggers()
-  for _, trigger in ipairs(ents.FindByClass("trigger_hurt"))do
-    local damage = trigger:GetInternalVariable("damage")
+	for _, trigger in ipairs(ents.FindByClass("trigger_hurt")) do
+		local damage = trigger:GetInternalVariable("damage")
 
-    if(damage < 0)then
-      trigger:SetKeyValue("damage", 0) 
-      trigger.HealAmount = math.abs(damage)
-    end 
-  end
+		if (damage < 0) then
+			-- Prevent anything weird happening in the future
+			trigger:SetKeyValue("damage", 0)
+			-- The damage keyvalue is per second, but `trigger_hurt` fires twice
+			-- a second so we need to divide it by 2
+			damage = math.abs(damage) / 2
+			trigger:Fire(
+				"AddOutput",
+				"OnHurtPlayer slide_map_controller:HealPlayer:" .. damage .. ":0:-1"
+			)
+		end
+	end
 end
 
-function GM:CheckMapEnd(ply, dmginfo)
-  local attacker = dmginfo:GetAttacker()
+function GM:AttachMapTriggers()
+	local mapdata = self.MapData[game.GetMap()]
 
-  if(not IsValid(attacker) or attacker:GetClass() ~= "trigger_hurt")then  
-    return false
-  end
+	if not mapdata then
+		return
+	end
 
-  local damage = dmginfo:GetDamage()
+	for _, ent in ipairs(ents.FindByMagicTarget(mapdata.FirstPush)) do
+		ent:AddOutput("OnStartTouch", "slide_map_controller", "StartRun")
+	end
 
-  if(damage ~= 0)then
-    if(attacker:GetInternalVariable("damage") ~= 100)then
-      return false
-    end
+	for _, ent in ipairs(ents.FindByMagicTarget(mapdata.LastBrush)) do
+		if mapdata.LastType == "push" then
+			ent:AddOutput("OnEndTouch", "slide_map_controller", "CompleteRun")
+		else
+			ent:AddOutput("OnStartTouch", "slide_map_controller", "CompleteRun")
+		end
+	end
 
-    if(not ply._CheckIsFinishingMap or CurTime() - ply._CheckIsFinishingMap > END_CHECK_INTERVAL)then
-      print"too late since finish and hurt 100"
-      return false
-    end
+	for _, ent in ipairs(ents.FindByMagicTarget(mapdata.RestartTriggers)) do
+		ent:AddOutput("OnStartTouch", "slide_map_controller", "RestartRun")
+	end
+end
 
-    gamemode.Call("SlidePlayerFinished", ply, ply._CheckIsFinishingMap)
-    return true
-  end
-
-  ply:SetHealth(ply:Health() + attacker.HealAmount)
-  
-  if(attacker.HealAmount ~= 200)then
-    return false
-  end
-
-  ply._CheckIsFinishingMap = CurTime()
-
-  return false
+function GM:SetupTriggerDebugs()
+	for _, ent in ipairs(ents.FindByClass("trigger_push")) do
+		ent:AddOutput("OnStartTouch", "slide_map_controller", "DebugStartPush")
+	end
+	for _, ent in ipairs(ents.FindByClass("trigger_multiple")) do
+		ent:AddOutput("OnTrigger", "slide_map_controller", "DebugTrigger")
+	end
+	for _, ent in ipairs(ents.FindByClass("trigger_teleport")) do
+		ent:AddOutput("OnStartTouch", "slide_map_controller", "DebugTele")
+	end
 end
 
 function GM:CheckMapTeleportEnd(ply, teleporter)

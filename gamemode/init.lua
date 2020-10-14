@@ -1,7 +1,7 @@
 --[[
 	Slide - gamemode/init.lua
 
-    Copyright 2017 Lex Robinson
+    Copyright 2017-2020 Lex Robinson
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -21,7 +21,16 @@ AddCSLuaFile("cl_init.lua")
 
 include("shared.lua")
 
+include("utils.lua")
+
+include("meta_entity.lua")
 include("meta_ply.lua")
+
+GM.MapData = {}
+
+for _, filename in ipairs(file.Find("slide/gamemode/mapdata/*.lua", "LUA")) do
+	include("slide/gamemode/mapdata/" .. filename)
+end
 
 include("mapfixes/entities.lua")
 include("mapfixes/triggers.lua")
@@ -29,12 +38,14 @@ include("mapfixes/triggers.lua")
 include("rounds.lua")
 
 function GM:FixMap()
+	self:CreateMapController()
 	self:RemoveMapBlockers()
 	self:ReplaceTriggerOnces()
 	self:ModifyHealTriggers()
 	self:MakeExplosionsRepeatable()
 	self:TryParentSpawnpoints()
-	self:SetupTeleportHook()
+	self:AttachMapTriggers()
+	self:SetupTriggerDebugs()
 end
 
 GM.ServerSettings = GM.ServerSettings or {}
@@ -46,20 +57,17 @@ GM.CSSSettings = {
 }
 
 function GM:InitPostEntity()
-	for key, value in pairs(self.CSSSettings) do
-		-- Getting it as a string since it's safe for any datatype we may add to CSSSettings
-		local oldValue = GetConVar(key):GetString()
-		self.ServerSettings[key] = oldValue
-
-		game.ConsoleCommand(key .. " " .. value .. "\n")
+	for cvar, value in pairs(self.CSSSettings) do
+		self.ServerSettings[cvar] = cvars.String(cvar)
+		RunConsoleCommand(cvar, value)
 	end
 	self:FixMap()
 end
 
 function GM:ShutDown()
 	-- Reset the convars
-	for key, value in pairs(self.ServerSettings) do
-		game.ConsoleCommand(key .. " " .. value .. "\n")
+	for cvar, value in pairs(self.ServerSettings) do
+		RunConsoleCommand(cvar, value)
 	end
 end
 
@@ -145,35 +153,46 @@ function GM:EntityTakeDamage(ply, dmginfo)
 	self:CheckMapEnd(ply, dmginfo)
 
 	if dmginfo:IsExplosionDamage() and dmginfo:GetDamage() < 100 then
-		-- Player just missed a mine. Play the explosion noise but don't actually damage them
-		dmginfo:SetDamage(1)
-		ply:SetHealth(ply:Health() + 1)
+		-- Either a) the player just missed a mine or b) this map uses multiple weak mines
+		-- We want the player to be either alive or dead, not wounded so negate
+		-- the mine damage but keep a record of it in case there are multiple
+		-- blasts
+		local damage = dmginfo:GetDamage()
+		local exstingDamage = ply._tempDamage or 0
+		local totalDamage = damage + exstingDamage
+		if totalDamage < ply:Health() then
+			ply._tempDamage = totalDamage
+			dmginfo:SetDamage(1)
+			ply:SetHealth(ply:Health() + 1)
+		else
+			dmginfo:SetDamage(totalDamage)
+		end
 	end
 end
 
---- Called when a player leaves the server. 
---- Player:SteamID, Player:SteamID64, and the like can return nil here.
---- This is not called in single-player or listen servers for the host.
-function GM:PlayerDisconnected(ply)
-	PrintMessage(HUD_PRINTTALK, ply:Name().. " has left the server.")
-
-	ply:SetTeam(TEAM_SPECTATOR)
-
-	self:CheckRoundEnd()
-end
-
---- Called when a player finishes the map
 --- @param ply GPlayer
---- @param finishedAt number The time (recorded CurTime) at which the player crossed the finishline (This hook is called several moments after it)
-function GM:SlidePlayerFinished(ply, finishedAt)
-	PrintMessage(HUD_PRINTTALK, ply:Nick() .. " has finished!")
-
-	self:PlayerFinishedRound(ply)
+function GM:PlayerPostThink(ply)
+	ply._tempDamage = 0
 end
 
---- Called when a player teleports
-function GM:OnPlayerTeleport(ply, teleporter)
-	print("teleport", ply, teleporter)
+--- @param ply GPlayer
+--- @param amount number
+--- @param ent GEntity
+function GM:MapHealPlayer(ply, amount, ent)
+	ply:SetHealth(math.min(ply:GetMaxHealth(), ply:Health() + amount))
+end
 
-	self:CheckMapTeleportEnd(ply, teleporter)
+--- @param ply GPlayer
+function GM:PlayerStartRun(ply)
+	PrintMessage(HUD_PRINTTALK, ply:Name() .. " Just started a run!")
+end
+
+--- @param ply GPlayer
+function GM:PlayerCompleteRun(ply)
+	PrintMessage(HUD_PRINTTALK, ply:Name() .. " Just finished!")
+end
+
+--- @param ply GPlayer
+function GM:PlayerRestartRun(ply)
+	PrintMessage(HUD_PRINTTALK, ply:Name() .. " Started again!")
 end
