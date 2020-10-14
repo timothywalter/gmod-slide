@@ -35,8 +35,6 @@ end
 include("mapfixes/entities.lua")
 include("mapfixes/triggers.lua")
 
-include("rounds.lua")
-
 function GM:FixMap()
 	self:CreateMapController()
 	self:RemoveMapBlockers()
@@ -85,8 +83,6 @@ function GM:PlayerSpawn(ply)
 	BaseClass.PlayerSpawn(self, ply)
 
 	ply:CreateRunData()
-
-	self:JoinRound(ply)
 end
 
 function GM:DoPlayerDeath(ply, ...)
@@ -105,10 +101,6 @@ function GM:DoPlayerDeath(ply, ...)
 	-- end
 end
 
-function GM:PostPlayerDeath(ply)
-	self:CheckRoundEnd()
-end
-
 function GM:PlayerSilentDeath(ply)
 	BaseClass.PlayerSilentDeath(self, ply)
 
@@ -118,15 +110,6 @@ function GM:PlayerSilentDeath(ply)
 		-- TODO: Do we want to keep rundata that results in a Lua based death? Presumably not
 		-- rd:Remove()
 	end
-end
-
---- Do not allow respawning by pressing space or clicking unless we only played last round
-function GM:PlayerDeathThink(ply)
-	if(ply.RoundNumber and ply.RoundNumber == self.Round)then
-		return false
-	end
-
-	BaseClass.PlayerDeathThink(self, ply)
 end
 
 function GM:Think()
@@ -149,8 +132,6 @@ function GM:EntityTakeDamage(ply, dmginfo)
 	if not (IsValid(ply) and ply:IsPlayer() and ply:Alive()) then
 		return
 	end
-
-	self:CheckMapEnd(ply, dmginfo)
 
 	if dmginfo:IsExplosionDamage() and dmginfo:GetDamage() < 100 then
 		-- Either a) the player just missed a mine or b) this map uses multiple weak mines
