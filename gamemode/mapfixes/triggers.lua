@@ -1,5 +1,5 @@
 --[[
-  Slide - gamemode/mapfixes/triggers.lua
+	Slide - gamemode/mapfixes/triggers.lua
 
     Copyright 2017-2020 Lex Robinson
 
@@ -16,9 +16,6 @@
     limitations under the License.
 ]] --
 DEFINE_BASECLASS "gamemode_base"
-
--- Interval between the -200 and 100 damage caused by trigger_hurt that informs us a player is at the end
-local END_CHECK_INTERVAL = 5
 
 local function replaceTrigger(ent)
 	if not ent.kvs then
@@ -98,18 +95,4 @@ function GM:SetupTriggerDebugs()
 	for _, ent in ipairs(ents.FindByClass("trigger_teleport")) do
 		ent:AddOutput("OnStartTouch", "slide_map_controller", "DebugTele")
 	end
-end
-
-function GM:CheckMapTeleportEnd(ply, teleporter)
-  local target = teleporter:GetInternalVariable("target")
-  local map = game.GetMap()
-
-  if(map == "slide_city_remake")then
-    if(target == "info_teleport_destination")then
-      gamemode.Call("SlidePlayerFinished", ply, CurTime())
-      return true
-    end
-
-    return false
-  end
 end
